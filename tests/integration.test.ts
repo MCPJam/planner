@@ -45,7 +45,7 @@ describe("Stateless MCP wire + persisted user outcomes", () => {
           uri: "ui://planner/calendar.html",
         });
         expect(resource.contents[0].mimeType).toBe("text/html;profile=mcp-app");
-        expect(String(resource.contents[0].text)).toContain("Re-plan week");
+        expect(String("text" in resource.contents[0] ? resource.contents[0].text : "")).toContain("Re-plan week");
         const resources = await manager.listResources("planner");
         expect(JSON.stringify(resources)).toContain(
           "ui://planner/calendar.html"

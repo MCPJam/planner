@@ -3,21 +3,26 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Planner — MCPJam</title>
+    <title>Planner demo — MCPJam</title>
     <style>
       /*CSS*/
     </style>
   </head>
   <body>
     <header>
-      <div class="brand">mcpjam<span> / planner</span></div>
-      <div class="toolbar">
-        <span id="mode" class="fine"></span
-        ><a href="/" id="reconnect">Reconnect</a>
-      </div>
+      <div class="brand">Planner demo</div>
+      <span class="mcpjam-logo" role="img" aria-label="MCPJam"
+        ><!--MCPJAM_LOGO--></span
+      >
     </header>
     <section class="intro">
-      <h1>Your week.</h1>
+      <div class="week-heading">
+        <h1>Your week</h1>
+        <div class="toolbar">
+          <span id="mode" class="fine"></span
+          ><a href="/" id="reconnect">Reconnect</a>
+        </div>
+      </div>
       <div class="toolbar">
         <button id="prev" aria-label="Previous week">←</button
         ><input

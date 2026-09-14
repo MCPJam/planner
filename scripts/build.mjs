@@ -5,6 +5,7 @@ const css =
   (await readFile("design-system/src/tokens.css", "utf8")) +
   "\n" +
   (await readFile("ui/style.css", "utf8"));
+const logo = await readFile("ui/assets/mcpjam-logo.svg", "utf8");
 const result = await build({
   entryPoints: ["ui/app.ts"],
   bundle: true,
@@ -16,7 +17,9 @@ const result = await build({
 });
 for (const page of ["app", "landing"]) {
   let html = await readFile(`ui/${page}.html`, "utf8");
-  html = html.replace("/*CSS*/", () => css);
+  html = html
+    .replace("/*CSS*/", () => css)
+    .replace("<!--MCPJAM_LOGO-->", () => logo);
   if (page === "app")
     html = html.replace("/*JS*/", () =>
       result.outputFiles[0].text.replaceAll("</script", "<\\/script")
