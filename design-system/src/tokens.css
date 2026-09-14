@@ -1,22 +1,23 @@
 /* Planner roles, based on the supplied Paper design. Keep colors here. */
-:root,.dark {
- --background:#030303;
- --foreground:#F3EDE8;
- --card:#0D0B0A;
- --card-foreground:#F3EDE8;
- --popover:#15110F;
- --popover-foreground:#F3EDE8;
- --primary:#E07856;
- --primary-foreground:#090504;
- --secondary:#211A17;
- --secondary-foreground:#F3EDE8;
- --muted:#161311;
- --muted-foreground:#A69B94;
- --accent:#29211D;
- --accent-foreground:#F3EDE8;
- --border:#322924;
- --input:#514037;
- --ring:#E07856;
- --destructive:#EE362F;
- --overlay:#030303B8;
+:root,
+.dark {
+  --background: #030303;
+  --foreground: #f3ede8;
+  --card: #0d0b0a;
+  --card-foreground: #f3ede8;
+  --popover: #15110f;
+  --popover-foreground: #f3ede8;
+  --primary: #e07856;
+  --primary-foreground: #090504;
+  --secondary: #211a17;
+  --secondary-foreground: #f3ede8;
+  --muted: #161311;
+  --muted-foreground: #a69b94;
+  --accent: #29211d;
+  --accent-foreground: #f3ede8;
+  --border: #322924;
+  --input: #514037;
+  --ring: #e07856;
+  --destructive: #ee362f;
+  --overlay: #030303b8;
 }

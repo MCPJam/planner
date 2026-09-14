@@ -1,53 +1,504 @@
-import {McpServer,createMcpHandler} from '@modelcontextprotocol/server';
-import {CfWorkerJsonSchemaValidator} from '@modelcontextprotocol/server/validators/cf-worker';
-import {registerAppTool,registerAppResource,RESOURCE_MIME_TYPE} from '@modelcontextprotocol/ext-apps/server';
-import {z} from 'zod';
-import {fixtures,overlap,planWeek,today,weekDates,type Item} from './data';
-import {load,save,context,type Env,type Identity} from './store';
-import appHtml from '../dist/app.html';
-import skill from '../skills/planner/SKILL.md';
-const date=z.string().regex(/^202[67]-\d{2}-\d{2}$/).refine(s=>!isNaN(Date.parse(s))&&new Date(s+'T00:00:00Z').toISOString().slice(0,10)===s,'Use a valid date in 2026–2027');
-const week={week:date.default('2026-09-14').describe('Any date in the target week, YYYY-MM-DD. Demo dates: 2026–2027; all times UTC.')};
-const page={query:z.string().max(500).default(''),offset:z.number().int().min(0).default(0),limit:z.number().int().min(1).max(100).default(20)};
-export const catalog={
- view_schedule:{description:'See a week calendar and open the interactive planner. Includes scheduled tasks, meetings and an unscheduled task backlog. Move or resize in the app.',schema:z.object(week)},
- find_tasks:{description:'Find and prioritize work: search dummy tasks by title or project, filter priority and completion, with bounded pagination.',schema:z.object({...page,priority:z.number().int().min(1).max(3).optional(),week:date.optional()})},
- read_emails:{description:'Find email context about deadlines, customer requests and shifting priorities. Returns synthetic messages; never sends email.',schema:z.object({...page,week:date.optional()})},
- plan_week:{description:'Build or re-plan a realistic work week. Protects meetings and lunch, schedules tasks without overlaps during 09:00–17:00 UTC, ranks the named priority projects first. Returns unscheduled work honestly. Set apply=true only when the user requests planning or approves a preview.',schema:z.object({...week,priorities:z.array(z.string().max(100)).max(5).default([]),max_focus_minutes:z.number().int().min(30).max(180).default(90),apply:z.boolean().default(false)})},
- move_item:{description:'Move a task or calendar event, or resize a focus block, after a user requests it. Rejects collisions and fixed events. start is minutes after midnight UTC; 600 = 10:00. Returns the updated calendar.',schema:z.object({id:z.string().max(100),date,start:z.number().int().min(540).max(1005),duration:z.number().int().min(15).max(180).optional()})},
- edit_item:{description:'Edit a task or movable event title, duration, priority (1 highest), or completion status. Never edits email or protected meetings.',schema:z.object({id:z.string().max(100),title:z.string().min(1).max(180).optional(),priority:z.number().int().min(1).max(3).optional(),duration:z.number().int().min(15).max(180).optional(),status:z.enum(['todo','done']).optional(),date:date.optional(),start:z.number().int().min(540).max(1005).optional()})},
- shift_priorities:{description:'Change a project priority across tasks in a week. Use plan_week next to re-plan the schedule around this change.',schema:z.object({...week,project:z.string().min(1).max(100),priority:z.number().int().min(1).max(3)})},
- report_outcome:{description:'Record explicit user feedback: did the plan actually achieve their goal? Do not infer satisfaction from a successful tool call.',schema:z.object({rating:z.enum(['useful','partial','not_useful']),feedback:z.string().min(1).max(1000)})}
+import { McpServer, createMcpHandler } from "@modelcontextprotocol/server";
+import { CfWorkerJsonSchemaValidator } from "@modelcontextprotocol/server/validators/cf-worker";
+import {
+  registerAppTool,
+  registerAppResource,
+  RESOURCE_MIME_TYPE,
+} from "@modelcontextprotocol/ext-apps/server";
+import { z } from "zod";
+import {
+  fixtures,
+  overlap,
+  planWeek,
+  today,
+  weekDates,
+  type Item,
+} from "./data";
+import { load, save, context, type Env, type Identity } from "./store";
+import appHtml from "../dist/app.html";
+import skill from "../skills/planner/SKILL.md";
+const date = z
+  .string()
+  .regex(/^202[67]-\d{2}-\d{2}$/)
+  .refine(
+    (s) =>
+      !isNaN(Date.parse(s)) &&
+      new Date(s + "T00:00:00Z").toISOString().slice(0, 10) === s,
+    "Use a valid date in 2026–2027"
+  );
+const week = {
+  week: date
+    .default("2026-09-14")
+    .describe(
+      "Any date in the target week, YYYY-MM-DD. Demo dates: 2026–2027; all times UTC."
+    ),
 };
-export type ToolName=keyof typeof catalog;
-const contextFields={session_id:z.string().min(1).max(120).describe('Client-generated goal handle, reused for this user goal. An application context key, NOT an MCP session.'),user_intent:z.string().min(1).max(1000).describe('User outcome this call serves.'),user_query:z.string().min(1).max(2000).describe('Pass the original user words faithfully. This is client-reported, not authoritative transcript data.')};
-export function searchTools(query:string){const synonyms=query.toLowerCase().replace(/calendar|agenda|timeline/g,'schedule').replace(/reschedul\w*|drag|drop|resize/g,'move').replace(/replan|re-plan/g,'plan').replace(/mail|inbox/g,'email');const words=synonyms.match(/[a-z]+/g)?.filter(w=>w.length>2&&!['the','and','for','with','want','please','show','need','this','that','can','you'].includes(w))??[];return Object.entries(catalog).map(([name,t])=>({name,description:t.description,inputSchema:z.toJSONSchema(t.schema),score:words.reduce((n,w)=>n+(name.includes(w)?5:0)+(t.description.toLowerCase().includes(w)?1:0),0)})).filter(x=>x.score>0).sort((a,b)=>b.score-a.score).slice(0,5);}
-function snapshot(items:Item[],week:string){const dates=weekDates(week);return {week:dates[0],dates,timezone:'UTC',events:items.filter(x=>x.kind!=='email'&&x.start>0&&dates.includes(x.date)).sort((a,b)=>a.date.localeCompare(b.date)||a.start-b.start),backlog:items.filter(x=>x.kind==='task'&&x.start===0&&x.status==='todo'&&dates.includes(x.date)),counts:{total:fixtures.length,events:fixtures.filter(x=>x.kind==='event').length,tasks:fixtures.filter(x=>x.kind==='task').length,emails:fixtures.filter(x=>x.kind==='email').length}};}
-export async function runTool(name:string,raw:Record<string,unknown>,env:Env,identity:Identity):Promise<Record<string,unknown>>{
- if(!(name in catalog))throw new Error('Unknown tool. Use search to discover a supported capability.');
- if(identity.mode==='context')z.object(contextFields).parse(raw);
- const args=catalog[name as ToolName].schema.parse(raw) as any;
- const items=await load(env.DB,identity.workspace);let result:Record<string,unknown>;
- if(name==='view_schedule')result=snapshot(items,args.week);
- else if(name==='find_tasks'||name==='read_emails'){const kind=name==='find_tasks'?'task':'email';const words=args.query.toLowerCase().split(/\s+/).filter(Boolean);const found=items.filter(x=>x.kind===kind&&(!args.week||weekDates(args.week).includes(x.date))&&(!args.priority||x.priority===args.priority)&&words.every((w:string)=>(x.title+' '+x.body+' '+x.project).toLowerCase().includes(w)));result={items:found.slice(args.offset,args.offset+args.limit),total:found.length,next_offset:args.offset+args.limit<found.length?args.offset+args.limit:null};}
- else if(name==='plan_week'){const plan=planWeek(items,args.week,args.priorities,args.max_focus_minutes);if(args.apply)await save(env.DB,identity.workspace,plan.changes);const map=new Map(plan.changes.map(x=>[x.id,x]));result={...snapshot(items.map(x=>map.get(x.id)??x),args.week),applied:args.apply,unscheduled:plan.unscheduled,assumptions:plan.assumptions,summary:`${plan.changes.filter(x=>x.start>0).length} tasks scheduled; ${plan.unscheduled.length} tasks remain unscheduled. ${args.apply?'Changes saved.':'Preview only.'}`};}
- else if(name==='move_item'||name==='edit_item'){const current=items.find(x=>x.id===args.id);if(!current)throw new Error('Item not found');if(current.kind==='email'||current.fixed)throw new Error('This item is protected. Choose a movable task or calendar event.');const changed:Item={...current,...args};if(changed.start>0&&(changed.start+changed.duration>1020||[0,6].includes(new Date(changed.date+'T00:00:00Z').getUTCDay())))throw new Error('Use a weekday between 09:00 and 17:00 UTC.');const conflict=items.find(x=>x.id!==changed.id&&x.kind!=='email'&&x.start>0&&overlap(x,changed));if(changed.start>0&&conflict)throw new Error(`Conflicts with ${conflict.title}. Choose another time or re-plan.`);await save(env.DB,identity.workspace,[changed]);result={...snapshot(items.map(x=>x.id===changed.id?changed:x),changed.date),updated:changed};}
- else if(name==='shift_priorities'){const changed=items.filter(x=>x.kind==='task'&&weekDates(args.week).includes(x.date)&&x.project.toLowerCase().includes(args.project.toLowerCase())).map(x=>({...x,priority:args.priority}));await save(env.DB,identity.workspace,changed);result={changed:changed.length,project:args.project,priority:args.priority,next_step:'Call plan_week to rebuild the schedule.'};}
- else result={recorded:true,...args};
- let fetched_context;
- if(identity.mode==='context'){const c=z.object(contextFields).parse(raw);fetched_context=await context(env.DB,identity.workspace,c.session_id,c.user_query,c.user_intent);}
- await env.DB.prepare('INSERT INTO traces(id,workspace,tool,session_id,user_query,user_intent,outcome) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),identity.workspace,name,String(raw.session_id??''),String(raw.user_query??''),String(raw.user_intent??''),JSON.stringify({success:true,summary:result.summary,rating:result.rating,feedback:result.feedback})).run();
- return {...result,mode:identity.mode,...(fetched_context?{fetched_context}:{}),context_provenance:'Client-reported intent; successful tool calls do not establish user satisfaction.'};
+const page = {
+  query: z.string().max(500).default(""),
+  offset: z.number().int().min(0).default(0),
+  limit: z.number().int().min(1).max(100).default(20),
+};
+export const catalog = {
+  view_schedule: {
+    description:
+      "See a week calendar and open the interactive planner. Includes scheduled tasks, meetings and an unscheduled task backlog. Move or resize in the app.",
+    schema: z.object(week),
+  },
+  find_tasks: {
+    description:
+      "Find and prioritize work: search dummy tasks by title or project, filter priority and completion, with bounded pagination.",
+    schema: z.object({
+      ...page,
+      priority: z.number().int().min(1).max(3).optional(),
+      week: date.optional(),
+    }),
+  },
+  read_emails: {
+    description:
+      "Find email context about deadlines, customer requests and shifting priorities. Returns synthetic messages; never sends email.",
+    schema: z.object({ ...page, week: date.optional() }),
+  },
+  plan_week: {
+    description:
+      "Build or re-plan a realistic work week. Protects meetings and lunch, schedules tasks without overlaps during 09:00–17:00 UTC, ranks the named priority projects first. Returns unscheduled work honestly. Set apply=true only when the user requests planning or approves a preview.",
+    schema: z.object({
+      ...week,
+      priorities: z.array(z.string().max(100)).max(5).default([]),
+      max_focus_minutes: z.number().int().min(30).max(180).default(90),
+      apply: z.boolean().default(false),
+    }),
+  },
+  move_item: {
+    description:
+      "Move a task or calendar event, or resize a focus block, after a user requests it. Rejects collisions and fixed events. start is minutes after midnight UTC; 600 = 10:00. Returns the updated calendar.",
+    schema: z.object({
+      id: z.string().max(100),
+      date,
+      start: z.number().int().min(540).max(1005),
+      duration: z.number().int().min(15).max(180).optional(),
+    }),
+  },
+  edit_item: {
+    description:
+      "Edit a task or movable event title, duration, priority (1 highest), or completion status. Never edits email or protected meetings.",
+    schema: z.object({
+      id: z.string().max(100),
+      title: z.string().min(1).max(180).optional(),
+      priority: z.number().int().min(1).max(3).optional(),
+      duration: z.number().int().min(15).max(180).optional(),
+      status: z.enum(["todo", "done"]).optional(),
+      date: date.optional(),
+      start: z.number().int().min(540).max(1005).optional(),
+    }),
+  },
+  shift_priorities: {
+    description:
+      "Change a project priority across tasks in a week. Use plan_week next to re-plan the schedule around this change.",
+    schema: z.object({
+      ...week,
+      project: z.string().min(1).max(100),
+      priority: z.number().int().min(1).max(3),
+    }),
+  },
+  report_outcome: {
+    description:
+      "Record explicit user feedback: did the plan actually achieve their goal? Do not infer satisfaction from a successful tool call.",
+    schema: z.object({
+      rating: z.enum(["useful", "partial", "not_useful"]),
+      feedback: z.string().min(1).max(1000),
+    }),
+  },
+};
+export type ToolName = keyof typeof catalog;
+const contextFields = {
+  session_id: z
+    .string()
+    .min(1)
+    .max(120)
+    .describe(
+      "Client-generated goal handle, reused for this user goal. An application context key, NOT an MCP session."
+    ),
+  user_intent: z
+    .string()
+    .min(1)
+    .max(1000)
+    .describe("User outcome this call serves."),
+  user_query: z
+    .string()
+    .min(1)
+    .max(2000)
+    .describe(
+      "Pass the original user words faithfully. This is client-reported, not authoritative transcript data."
+    ),
+};
+export function searchTools(query: string) {
+  const synonyms = query
+    .toLowerCase()
+    .replace(/calendar|agenda|timeline/g, "schedule")
+    .replace(/reschedul\w*|drag|drop|resize/g, "move")
+    .replace(/replan|re-plan/g, "plan")
+    .replace(/mail|inbox/g, "email");
+  const words =
+    synonyms
+      .match(/[a-z]+/g)
+      ?.filter(
+        (w) =>
+          w.length > 2 &&
+          ![
+            "the",
+            "and",
+            "for",
+            "with",
+            "want",
+            "please",
+            "show",
+            "need",
+            "this",
+            "that",
+            "can",
+            "you",
+          ].includes(w)
+      ) ?? [];
+  return Object.entries(catalog)
+    .map(([name, t]) => ({
+      name,
+      description: t.description,
+      inputSchema: z.toJSONSchema(t.schema),
+      score: words.reduce(
+        (n, w) =>
+          n +
+          (name.includes(w) ? 5 : 0) +
+          (t.description.toLowerCase().includes(w) ? 1 : 0),
+        0
+      ),
+    }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 5);
 }
-export function handleMcp(request:Request,env:Env,identity:Identity){return createMcpHandler(()=>{
- const server=new McpServer({name:'MCPJam Planner',version:'1.0.0'},{instructions:`Demo planning assistant. Data is entirely synthetic (2026–2027), times UTC. Today is ${today()}. Use explicit requested dates. Clarify priorities when ambiguous. Never claim work fits if unscheduled tasks remain. Read planner://skill for guidance. Toolset: ${identity.mode}.`,jsonSchemaValidator:new CfWorkerJsonSchemaValidator()});
- const uri='ui://planner/calendar.html';
- registerAppResource(server,'Planner calendar',uri,{description:'Drag, resize and re-plan the week'},async()=>({contents:[{uri,mimeType:RESOURCE_MIME_TYPE,text:appHtml,_meta:{ui:{prefersBorder:true,csp:{connectDomains:[],resourceDomains:[]}}}}]}));
- server.registerResource('Planning guidance','planner://skill',{mimeType:'text/markdown'},async()=>({contents:[{uri:'planner://skill',mimeType:'text/markdown',text:skill}]}));
- const invoke=async(name:string,args:Record<string,unknown>)=>{try{const data=await runTool(name,args,env,identity);return {content:[{type:'text' as const,text:JSON.stringify(data)}],structuredContent:data};}catch(error){return {isError:true,content:[{type:'text' as const,text:error instanceof Error?error.message:String(error)}]};}};
- if(identity.mode==='discovery'){
- server.registerTool('search',{description:'Search the server tool catalog using the user’s raw query. Returns matching job tools and their exact argument schemas. Zero matches indicates unsupported demand; do not invent tools.',inputSchema:z.object({query:z.string().min(1).max(2000)})},async({query})=>{const matches=searchTools(query);await env.DB.prepare('INSERT INTO traces(id,workspace,tool,user_query,outcome) VALUES(?,?,?,?,?)').bind(crypto.randomUUID(),identity.workspace,'search',query,JSON.stringify({matches:matches.map(x=>x.name),coverage_gap:matches.length===0})).run();return {content:[{type:'text',text:JSON.stringify({matches,coverage_gap:matches.length===0})}]};});
- registerAppTool(server,'execute',{description:'Execute a discovered tool by name with the arguments returned by search. No arbitrary code execution. Calendar results render an interactive app.',inputSchema:z.object({name:z.enum(Object.keys(catalog) as [ToolName,...ToolName[]]),arguments:z.record(z.string(),z.unknown())}),_meta:{ui:{resourceUri:uri,visibility:['model','app']}}},async(args)=>invoke(args.name,args.arguments));
- }else for(const [name,tool] of Object.entries(catalog))registerAppTool(server,name,{description:tool.description,inputSchema:identity.mode==='context'?tool.schema.extend(contextFields):tool.schema,_meta:{ui:{resourceUri:uri,visibility:['model','app']}},annotations:{readOnlyHint:['view_schedule','find_tasks','read_emails'].includes(name),destructiveHint:false,openWorldHint:false}},async(args:Record<string,unknown>)=>invoke(name,args));
- return server;
- },{legacy:'stateless'}).fetch(request);}
+function snapshot(items: Item[], week: string) {
+  const dates = weekDates(week);
+  return {
+    week: dates[0],
+    dates,
+    timezone: "UTC",
+    events: items
+      .filter(
+        (x) => x.kind !== "email" && x.start > 0 && dates.includes(x.date)
+      )
+      .sort((a, b) => a.date.localeCompare(b.date) || a.start - b.start),
+    backlog: items.filter(
+      (x) =>
+        x.kind === "task" &&
+        x.start === 0 &&
+        x.status === "todo" &&
+        dates.includes(x.date)
+    ),
+    counts: {
+      total: fixtures.length,
+      events: fixtures.filter((x) => x.kind === "event").length,
+      tasks: fixtures.filter((x) => x.kind === "task").length,
+      emails: fixtures.filter((x) => x.kind === "email").length,
+    },
+  };
+}
+export async function runTool(
+  name: string,
+  raw: Record<string, unknown>,
+  env: Env,
+  identity: Identity
+): Promise<Record<string, unknown>> {
+  if (!(name in catalog))
+    throw new Error(
+      "Unknown tool. Use search to discover a supported capability."
+    );
+  if (identity.mode === "context") z.object(contextFields).parse(raw);
+  const args = catalog[name as ToolName].schema.parse(raw) as any;
+  const items = await load(env.DB, identity.workspace);
+  let result: Record<string, unknown>;
+  if (name === "view_schedule") result = snapshot(items, args.week);
+  else if (name === "find_tasks" || name === "read_emails") {
+    const kind = name === "find_tasks" ? "task" : "email";
+    const words = args.query.toLowerCase().split(/\s+/).filter(Boolean);
+    const found = items.filter(
+      (x) =>
+        x.kind === kind &&
+        (!args.week || weekDates(args.week).includes(x.date)) &&
+        (!args.priority || x.priority === args.priority) &&
+        words.every((w: string) =>
+          (x.title + " " + x.body + " " + x.project).toLowerCase().includes(w)
+        )
+    );
+    result = {
+      items: found.slice(args.offset, args.offset + args.limit),
+      total: found.length,
+      next_offset:
+        args.offset + args.limit < found.length
+          ? args.offset + args.limit
+          : null,
+    };
+  } else if (name === "plan_week") {
+    const plan = planWeek(
+      items,
+      args.week,
+      args.priorities,
+      args.max_focus_minutes
+    );
+    if (args.apply) await save(env.DB, identity.workspace, plan.changes);
+    const map = new Map(plan.changes.map((x) => [x.id, x]));
+    result = {
+      ...snapshot(
+        items.map((x) => map.get(x.id) ?? x),
+        args.week
+      ),
+      applied: args.apply,
+      unscheduled: plan.unscheduled,
+      assumptions: plan.assumptions,
+      summary: `${
+        plan.changes.filter((x) => x.start > 0).length
+      } tasks scheduled; ${plan.unscheduled.length} tasks remain unscheduled. ${
+        args.apply ? "Changes saved." : "Preview only."
+      }`,
+    };
+  } else if (name === "move_item" || name === "edit_item") {
+    const current = items.find((x) => x.id === args.id);
+    if (!current) throw new Error("Item not found");
+    if (current.kind === "email" || current.fixed)
+      throw new Error(
+        "This item is protected. Choose a movable task or calendar event."
+      );
+    const changed: Item = { ...current, ...args };
+    if (
+      changed.start > 0 &&
+      (changed.start + changed.duration > 1020 ||
+        [0, 6].includes(new Date(changed.date + "T00:00:00Z").getUTCDay()))
+    )
+      throw new Error("Use a weekday between 09:00 and 17:00 UTC.");
+    const conflict = items.find(
+      (x) =>
+        x.id !== changed.id &&
+        x.kind !== "email" &&
+        x.start > 0 &&
+        overlap(x, changed)
+    );
+    if (changed.start > 0 && conflict)
+      throw new Error(
+        `Conflicts with ${conflict.title}. Choose another time or re-plan.`
+      );
+    await save(env.DB, identity.workspace, [changed]);
+    result = {
+      ...snapshot(
+        items.map((x) => (x.id === changed.id ? changed : x)),
+        changed.date
+      ),
+      updated: changed,
+    };
+  } else if (name === "shift_priorities") {
+    const changed = items
+      .filter(
+        (x) =>
+          x.kind === "task" &&
+          weekDates(args.week).includes(x.date) &&
+          x.project.toLowerCase().includes(args.project.toLowerCase())
+      )
+      .map((x) => ({ ...x, priority: args.priority }));
+    await save(env.DB, identity.workspace, changed);
+    result = {
+      changed: changed.length,
+      project: args.project,
+      priority: args.priority,
+      next_step: "Call plan_week to rebuild the schedule.",
+    };
+  } else result = { recorded: true, ...args };
+  let fetched_context;
+  if (identity.mode === "context") {
+    const c = z.object(contextFields).parse(raw);
+    fetched_context = await context(
+      env.DB,
+      identity.workspace,
+      c.session_id,
+      c.user_query,
+      c.user_intent
+    );
+  }
+  await env.DB.prepare(
+    "INSERT INTO traces(id,workspace,tool,session_id,user_query,user_intent,outcome) VALUES(?,?,?,?,?,?,?)"
+  )
+    .bind(
+      crypto.randomUUID(),
+      identity.workspace,
+      name,
+      String(raw.session_id ?? ""),
+      String(raw.user_query ?? ""),
+      String(raw.user_intent ?? ""),
+      JSON.stringify({
+        success: true,
+        summary: result.summary,
+        rating: result.rating,
+        feedback: result.feedback,
+      })
+    )
+    .run();
+  return {
+    ...result,
+    mode: identity.mode,
+    ...(fetched_context ? { fetched_context } : {}),
+    context_provenance:
+      "Client-reported intent; successful tool calls do not establish user satisfaction.",
+  };
+}
+export function handleMcp(request: Request, env: Env, identity: Identity) {
+  return createMcpHandler(
+    () => {
+      const server = new McpServer(
+        { name: "MCPJam Planner", version: "1.0.0" },
+        {
+          instructions: `Demo planning assistant. Data is entirely synthetic (2026–2027), times UTC. Today is ${today()}. Use explicit requested dates. Clarify priorities when ambiguous. Never claim work fits if unscheduled tasks remain. Read planner://skill for guidance. Toolset: ${
+            identity.mode
+          }.`,
+          jsonSchemaValidator: new CfWorkerJsonSchemaValidator(),
+        }
+      );
+      const uri = "ui://planner/calendar.html";
+      registerAppResource(
+        server,
+        "Planner calendar",
+        uri,
+        { description: "Drag, resize and re-plan the week" },
+        async () => ({
+          contents: [
+            {
+              uri,
+              mimeType: RESOURCE_MIME_TYPE,
+              text: appHtml,
+              _meta: {
+                ui: {
+                  prefersBorder: true,
+                  csp: { connectDomains: [], resourceDomains: [] },
+                },
+              },
+            },
+          ],
+        })
+      );
+      server.registerResource(
+        "Planning guidance",
+        "planner://skill",
+        { mimeType: "text/markdown" },
+        async () => ({
+          contents: [
+            { uri: "planner://skill", mimeType: "text/markdown", text: skill },
+          ],
+        })
+      );
+      const invoke = async (name: string, args: Record<string, unknown>) => {
+        try {
+          const data = await runTool(name, args, env, identity);
+          return {
+            content: [{ type: "text" as const, text: JSON.stringify(data) }],
+            structuredContent: data,
+          };
+        } catch (error) {
+          return {
+            isError: true,
+            content: [
+              {
+                type: "text" as const,
+                text: error instanceof Error ? error.message : String(error),
+              },
+            ],
+          };
+        }
+      };
+      if (identity.mode === "discovery") {
+        server.registerTool(
+          "search",
+          {
+            description:
+              "Search the server tool catalog using the user’s raw query. Returns matching job tools and their exact argument schemas. Zero matches indicates unsupported demand; do not invent tools.",
+            inputSchema: z.object({ query: z.string().min(1).max(2000) }),
+          },
+          async ({ query }) => {
+            const matches = searchTools(query);
+            await env.DB.prepare(
+              "INSERT INTO traces(id,workspace,tool,user_query,outcome) VALUES(?,?,?,?,?)"
+            )
+              .bind(
+                crypto.randomUUID(),
+                identity.workspace,
+                "search",
+                query,
+                JSON.stringify({
+                  matches: matches.map((x) => x.name),
+                  coverage_gap: matches.length === 0,
+                })
+              )
+              .run();
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    matches,
+                    coverage_gap: matches.length === 0,
+                  }),
+                },
+              ],
+            };
+          }
+        );
+        registerAppTool(
+          server,
+          "execute",
+          {
+            description:
+              "Execute a discovered tool by name with the arguments returned by search. No arbitrary code execution. Calendar results render an interactive app.",
+            inputSchema: z.object({
+              name: z.enum(Object.keys(catalog) as [ToolName, ...ToolName[]]),
+              arguments: z.record(z.string(), z.unknown()),
+            }),
+            _meta: { ui: { resourceUri: uri, visibility: ["model", "app"] } },
+          },
+          async (args) => invoke(args.name, args.arguments)
+        );
+      } else
+        for (const [name, tool] of Object.entries(catalog))
+          registerAppTool(
+            server,
+            name,
+            {
+              description: tool.description,
+              inputSchema:
+                identity.mode === "context"
+                  ? tool.schema.extend(contextFields)
+                  : tool.schema,
+              _meta: {
+                ui: {
+                  ...([
+                    "view_schedule",
+                    "plan_week",
+                    "move_item",
+                    "edit_item",
+                  ].includes(name)
+                    ? { resourceUri: uri }
+                    : {}),
+                  visibility: ["model", "app"],
+                },
+              },
+              annotations: {
+                readOnlyHint: [
+                  "view_schedule",
+                  "find_tasks",
+                  "read_emails",
+                ].includes(name),
+                destructiveHint: false,
+                openWorldHint: false,
+              },
+            },
+            async (args: Record<string, unknown>) => invoke(name, args)
+          );
+      return server;
+    },
+    { legacy: "stateless" }
+  ).fetch(request);
+}

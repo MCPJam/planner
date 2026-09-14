@@ -1,12 +1,21 @@
 {
- "$schema":"node_modules/wrangler/config-schema.json",
- "name":"mcpjam-planner",
- "main":"src/index.ts",
- "compatibility_date":"2026-09-14",
- "compatibility_flags":["nodejs_compat"],
- "workers_dev":true,
- "routes":[{"pattern":"planner.mcpjam.com","custom_domain":true}],
- "observability":{"enabled":true},
- "d1_databases":[{"binding":"DB","database_name":"planner","database_id":"50ed4e5c-234d-436d-b67a-0f56809171b7","migrations_dir":"migrations"}],
- "rules":[{"type":"Text","globs":["**/*.html","**/*.md"],"fallthrough":true}]
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mcpjam-planner",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "routes": [{ "pattern": "planner.mcpjam.com", "custom_domain": true }],
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "planner",
+      "database_id": "50ed4e5c-234d-436d-b67a-0f56809171b7",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html", "**/*.md"], "fallthrough": true }
+  ]
 }

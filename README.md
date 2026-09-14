@@ -17,24 +17,24 @@ MCP Apps-capable hosts can render the calendar and call server tools from the UI
 
 ## Three versions, same jobs
 
-| Consent | Exposed tools | What the experiment measures |
-|---|---|---|
-| Job tools | 8 direct tools | Capability coverage and job-oriented selection |
-| With context | Same 8 tools plus required `session_id`, `user_intent`, `user_query` arguments | Explicit goal context and intent observability |
-| Search + execute | Only `search` and `execute` | Discovery from raw queries; zero matches expose coverage gaps |
+| Consent          | Exposed tools                                                                  | What the experiment measures                                  |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| Job tools        | 8 direct tools                                                                 | Capability coverage and job-oriented selection                |
+| With context     | Same 8 tools plus required `session_id`, `user_intent`, `user_query` arguments | Explicit goal context and intent observability                |
+| Search + execute | Only `search` and `execute`                                                    | Discovery from raw queries; zero matches expose coverage gaps |
 
 `search` uses deterministic token/keyword scoring over the tool catalog, not semantic embeddings. `execute` validates against the discovered schema and never evaluates code.
 
-| User job | Tool | Example prompt |
-|---|---|---|
-| Understand my week | `view_schedule` | Show September 14–18, 2026. |
-| Find important work | `find_tasks` | Find Launch Orion tasks for that week. |
-| Understand changing deadlines | `read_emails` | Find customer deadline emails. |
-| Make a realistic plan | `plan_week` | Plan and save my week around Launch Orion. |
-| Move / resize work | `move_item` | Move demo prep to Thursday 10:00 UTC. |
-| Edit a commitment | `edit_item` | Rename this task and give it 45 minutes. |
-| Change what matters | `shift_priorities` | Customer research is priority 1; re-plan. |
-| Measure user value | `report_outcome` | This plan was useful / partly useful / not useful. |
+| User job                      | Tool               | Example prompt                                     |
+| ----------------------------- | ------------------ | -------------------------------------------------- |
+| Understand my week            | `view_schedule`    | Show September 14–18, 2026.                        |
+| Find important work           | `find_tasks`       | Find Launch Orion tasks for that week.             |
+| Understand changing deadlines | `read_emails`      | Find customer deadline emails.                     |
+| Make a realistic plan         | `plan_week`        | Plan and save my week around Launch Orion.         |
+| Move / resize work            | `move_item`        | Move demo prep to Thursday 10:00 UTC.              |
+| Edit a commitment             | `edit_item`        | Rename this task and give it 45 minutes.           |
+| Change what matters           | `shift_priorities` | Customer research is priority 1; re-plan.          |
+| Measure user value            | `report_outcome`   | This plan was useful / partly useful / not useful. |
 
 ## Architecture: stateless does not mean contextless
 
