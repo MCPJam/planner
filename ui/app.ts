@@ -1,5 +1,6 @@
 import { App } from "@modelcontextprotocol/ext-apps";
 import type { Item } from "../src/data";
+import { snapStart, proposedIssue, minutes } from "./scheduling";
 type Snapshot = {
   week: string;
   dates: string[];
@@ -25,6 +26,11 @@ if (fragment.has("token")) {
 let state: Snapshot | null = null,
   busy = false,
   editing: Item | null = null;
+let dragged: Item | null = null;
+let grabOffset = 0;
+let editAction: "edit" | "move" | "resize" | "schedule" = "edit";
+let preview: Item | null = null;
+const guideDefault = "Drag to move · Pull the bottom edge to resize";
 const goal = crypto.randomUUID();
 const app = new App(
   { name: "MCPJam Planner", version: "1.0.0" },
@@ -54,6 +60,7 @@ function accept(data: any) {
     state = data;
     render();
     status(data.summary ?? "");
+    if ($<HTMLDialogElement>("editor").open) validateEdit();
   }
 }
 async function call(
@@ -125,6 +132,7 @@ async function call(
     document
       .querySelectorAll<HTMLButtonElement>("button")
       .forEach((x) => (x.disabled = false));
+    if ($<HTMLDialogElement>("editor").open) validateEdit();
   }
 }
 const act = (fn: () => Promise<unknown>) =>
@@ -146,7 +154,7 @@ function render() {
     const meta = document.createElement("small");
     meta.textContent = `${item.duration} min · ${item.project}`;
     el.append(title, meta);
-    el.ondragstart = (e) => e.dataTransfer?.setData("text/plain", item.id);
+    wireDrag(el, item, true);
     el.onclick = () => edit(item);
     el.onkeydown = (e) => {
       if (e.key === "Enter") edit(item);
@@ -184,28 +192,46 @@ function render() {
     const day = document.createElement("div");
     day.className = "day";
     day.dataset.date = date;
-    day.ondragover = (e) => e.preventDefault();
+    day.ondragover = (e) => {
+      if (!dragged || busy) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      const rect = day.getBoundingClientRect();
+      showPreview({
+        ...dragged,
+        date,
+        start: snapStart(
+          e.clientY,
+          rect.top,
+          rect.height,
+          dragged.duration,
+          grabOffset
+        ),
+      });
+    };
+    day.ondragleave = (e) => {
+      if (
+        !day.contains(e.relatedTarget as Node | null) &&
+        !$<HTMLDialogElement>("editor").open
+      )
+        clearPreview();
+    };
     day.ondrop = (e) => {
       e.preventDefault();
-      const id = e.dataTransfer?.getData("text/plain");
-      const start =
-        540 +
-        Math.max(
-          0,
-          Math.min(
-            31,
-            Math.floor((e.clientY - day.getBoundingClientRect().top) / 18)
-          )
-        ) *
-          15;
-      if (id)
-        act(() =>
-          call(
-            "move_item",
-            { id, date, start },
-            `Move ${id} to ${date} at ${time(start)} UTC`
-          )
-        );
+      if (!dragged || busy) return;
+      const rect = day.getBoundingClientRect();
+      const candidate = {
+        ...dragged,
+        date,
+        start: snapStart(
+          e.clientY,
+          rect.top,
+          rect.height,
+          dragged.duration,
+          grabOffset
+        ),
+      };
+      edit(dragged, candidate, dragged.start ? "move" : "schedule");
     };
     for (const item of s.events.filter((x) => x.date === date)) {
       const el = document.createElement("div");
@@ -230,7 +256,7 @@ function render() {
       const title = document.createElement("b");
       title.textContent = item.title.split(" · ")[0];
       el.append(small, title);
-      el.ondragstart = (e) => e.dataTransfer?.setData("text/plain", item.id);
+      if (!item.fixed) wireDrag(el, item);
       el.onclick = () => {
         if (!item.fixed) edit(item);
         else status("This commitment is protected.");
@@ -243,41 +269,43 @@ function render() {
         resize.className = "resize";
         resize.title = "Drag to resize";
         resize.onpointerdown = (e) => {
+          if (busy) return;
           e.stopPropagation();
           e.preventDefault();
           const y = e.clientY;
+          const scale = day.getBoundingClientRect().height / 480;
           resize.setPointerCapture(e.pointerId);
+          el.classList.add("drag-source");
+          let candidate = { ...item };
+          showPreview(candidate);
           resize.onpointermove = (ev) => {
             const duration = Math.max(
               15,
               Math.min(
                 180,
-                Math.round((item.duration + (ev.clientY - y) / 1.2) / 15) * 15
+                1020 - item.start,
+                Math.round((item.duration + (ev.clientY - y) / scale) / 15) * 15
               )
             );
-            el.style.height = `${duration * 1.2}px`;
+            candidate = { ...item, duration };
+            showPreview(candidate);
+          };
+          const cleanup = () => {
+            resize.onpointermove = null;
+            resize.onpointerup = null;
+            resize.onpointercancel = null;
+            el.classList.remove("drag-source");
           };
           resize.onpointerup = (ev) => {
             ev.stopPropagation();
-            resize.onpointermove = null;
-            resize.onpointerup = null;
-            const duration = Math.max(
-              15,
-              Math.min(
-                180,
-                Math.round((item.duration + (ev.clientY - y) / 1.2) / 15) * 15
-              )
-            );
-            act(() =>
-              call(
-                "move_item",
-                { id: item.id, date: item.date, start: item.start, duration },
-                `Resize ${item.title} to ${duration} minutes`
-              ).catch((error) => {
-                render();
-                throw error;
-              })
-            );
+            cleanup();
+            if (candidate.duration !== item.duration)
+              edit(item, candidate, "resize");
+            else clearPreview();
+          };
+          resize.onpointercancel = () => {
+            cleanup();
+            clearPreview();
           };
         };
         resize.onclick = (e) => e.stopPropagation();
@@ -288,34 +316,229 @@ function render() {
     calendar.append(day);
   }
 }
-function edit(item: Item) {
-  editing = item;
-  $<HTMLInputElement>("edit-title").value = item.title;
-  $<HTMLInputElement>("edit-date").value = item.date;
-  $<HTMLInputElement>("edit-time").value = time(item.start || 600);
-  $<HTMLInputElement>("edit-duration").value = String(item.duration);
-  $<HTMLDialogElement>("editor").showModal();
+function wireDrag(el: HTMLElement, item: Item, backlog = false) {
+  el.ondragstart = (e) => {
+    if (busy || $<HTMLDialogElement>("editor").open) {
+      e.preventDefault();
+      return;
+    }
+    dragged = item;
+    grabOffset = backlog
+      ? 0
+      : Math.max(
+          0,
+          (e.clientY - el.getBoundingClientRect().top) /
+            (el.parentElement!.getBoundingClientRect().height / 480)
+        );
+    e.dataTransfer?.setData("text/plain", item.id);
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+    el.classList.add("drag-source");
+    $("calendar").classList.add("dragging");
+    $("drag-guide").textContent = "Drop on a time slot to review the change";
+  };
+  el.ondragend = () => {
+    dragged = null;
+    el.classList.remove("drag-source");
+    $("calendar").classList.remove("dragging");
+    if (!$<HTMLDialogElement>("editor").open) clearPreview();
+  };
 }
-$("cancel-edit").onclick = () => $<HTMLDialogElement>("editor").close();
-$("edit-form").onsubmit = (e) => {
+function clearPreview() {
+  preview = null;
+  document.querySelectorAll(".drop-preview").forEach((x) => x.remove());
+  document
+    .querySelectorAll(".drop-target")
+    .forEach((x) => x.classList.remove("drop-target"));
+  $("drag-guide").textContent = guideDefault;
+}
+function showPreview(item: Item) {
+  preview = item;
+  const day = Array.from(document.querySelectorAll<HTMLElement>(".day")).find(
+    (x) => x.dataset.date === item.date
+  );
+  document
+    .querySelectorAll(".drop-target")
+    .forEach((x) => x.classList.remove("drop-target"));
+  let ghost = document.querySelector<HTMLElement>(".drop-preview");
+  if (!day) {
+    ghost?.remove();
+    return;
+  }
+  if (!ghost) {
+    ghost = document.createElement("div");
+    ghost.className = "drop-preview";
+    ghost.setAttribute("aria-hidden", "true");
+  }
+  const issue = proposedIssue(item, state?.events ?? []);
+  ghost.classList.toggle("conflict", !!issue);
+  ghost.style.top = `${((item.start - 540) / 480) * 100}%`;
+  ghost.style.height = `${(item.duration / 480) * 100}%`;
+  ghost.replaceChildren();
+  const label = document.createElement("strong");
+  label.textContent = `${time(item.start)}–${time(item.start + item.duration)}`;
+  const name = document.createElement("span");
+  name.textContent = item.title.split(" · ")[0];
+  const detail = document.createElement("small");
+  detail.textContent = issue ? "Time conflict" : `${item.duration} min`;
+  ghost.append(label, name, detail);
+  day.append(ghost);
+  day.classList.add("drop-target");
+  $("drag-guide").textContent = `${item.date} · ${time(item.start)}–${time(
+    item.start + item.duration
+  )} · ${item.duration} min${issue ? " · Time conflict" : ""}`;
+}
+function edit(
+  item: Item,
+  candidate: Item = { ...item, start: item.start || 600 },
+  action: typeof editAction = "edit"
+) {
+  if (busy || $<HTMLDialogElement>("editor").open) return;
+  editing = item;
+  editAction = action;
+  $("editor-heading").textContent =
+    action === "move"
+      ? "Move event"
+      : action === "resize"
+      ? "Resize event"
+      : !item.start
+      ? "Schedule task"
+      : "Edit event";
+  $("edit-before").textContent = item.start
+    ? `From ${item.date} · ${time(item.start)}–${time(
+        item.start + item.duration
+      )}`
+    : "Unscheduled task";
+  $<HTMLInputElement>("edit-title").value = item.title;
+  $<HTMLInputElement>("edit-date").value = candidate.date;
+  $<HTMLInputElement>("edit-time").value = time(candidate.start);
+  $<HTMLInputElement>("edit-duration").value = String(candidate.duration);
+  $<HTMLInputElement>("edit-end").value = time(
+    candidate.start + candidate.duration
+  );
+  $("save-edit").textContent =
+    action === "move"
+      ? "Confirm move"
+      : action === "resize"
+      ? "Confirm duration"
+      : !item.start
+      ? "Schedule"
+      : "Save changes";
+  $<HTMLDialogElement>("editor").showModal();
+  validateEdit();
+}
+function editCandidate(): Item | null {
+  if (!editing) return null;
+  return {
+    ...editing,
+    title: $<HTMLInputElement>("edit-title").value,
+    date: $<HTMLInputElement>("edit-date").value,
+    start: minutes($<HTMLInputElement>("edit-time").value),
+    duration: Number($<HTMLInputElement>("edit-duration").value),
+  };
+}
+function validateEdit() {
+  const candidate = editCandidate();
+  if (!candidate) return false;
+  const issue = !candidate.title.trim()
+    ? "Enter a title."
+    : proposedIssue(candidate, state?.events ?? []);
+  $("edit-error").textContent = issue;
+  $<HTMLButtonElement>("save-edit").disabled = busy || !!issue;
+  $("edit-summary").textContent =
+    Number.isFinite(candidate.start) && Number.isFinite(candidate.duration)
+      ? `${time(candidate.start)}–${time(
+          candidate.start + candidate.duration
+        )} · ${candidate.duration} minutes total`
+      : "Choose a start time and duration";
+  if (
+    !issue ||
+    (Number.isFinite(candidate.start) &&
+      candidate.duration >= 15 &&
+      candidate.duration <= 180)
+  )
+    showPreview(candidate);
+  else clearPreview();
+  document
+    .querySelectorAll<HTMLButtonElement>("[data-duration]")
+    .forEach((b) =>
+      b.setAttribute(
+        "aria-pressed",
+        String(Number(b.dataset.duration) === candidate.duration)
+      )
+    );
+  return !issue;
+}
+for (const id of ["edit-date", "edit-title"])
+  $(id).oninput = () => validateEdit();
+for (const id of ["edit-time", "edit-duration"])
+  $(id).oninput = () => {
+    const candidate = editCandidate();
+    $<HTMLInputElement>("edit-end").value =
+      candidate && Number.isFinite(candidate.start + candidate.duration)
+        ? time(candidate.start + candidate.duration)
+        : "";
+    validateEdit();
+  };
+$("edit-end").oninput = () => {
+  $<HTMLInputElement>("edit-duration").value = String(
+    minutes($<HTMLInputElement>("edit-end").value) -
+      minutes($<HTMLInputElement>("edit-time").value)
+  );
+  validateEdit();
+};
+for (const button of document.querySelectorAll<HTMLButtonElement>(
+  "[data-duration]"
+))
+  button.onclick = () => {
+    $<HTMLInputElement>("edit-duration").value = button.dataset.duration!;
+    const candidate = editCandidate();
+    if (candidate)
+      $<HTMLInputElement>("edit-end").value = time(
+        candidate.start + candidate.duration
+      );
+    validateEdit();
+  };
+$("cancel-edit").onclick = () => {
+  if (!busy) $<HTMLDialogElement>("editor").close();
+};
+$("editor").addEventListener("cancel", (e) => {
+  if (busy) e.preventDefault();
+});
+$("editor").addEventListener("close", () => {
+  editing = null;
+  clearPreview();
+});
+$("edit-form").onsubmit = async (e) => {
   e.preventDefault();
-  if (!editing) return;
-  const item = editing;
-  const [h, m] = $<HTMLInputElement>("edit-time").value.split(":").map(Number);
-  act(async () => {
+  if (!validateEdit()) return;
+  const candidate = editCandidate()!;
+  const action = editAction;
+  try {
     await call(
       "edit_item",
       {
-        id: item.id,
-        title: $<HTMLInputElement>("edit-title").value,
-        date: $<HTMLInputElement>("edit-date").value,
-        start: h * 60 + m,
-        duration: Number($<HTMLInputElement>("edit-duration").value),
+        id: candidate.id,
+        title: candidate.title,
+        date: candidate.date,
+        start: candidate.start,
+        duration: candidate.duration,
       },
-      `Edit ${item.title} using the calendar form`
+      `${action} ${candidate.title} to ${candidate.date}, ${time(
+        candidate.start
+      )}–${time(candidate.start + candidate.duration)} UTC (${
+        candidate.duration
+      } minutes)`
     );
     $<HTMLDialogElement>("editor").close();
-  });
+    status(
+      `Saved · ${candidate.date} · ${time(candidate.start)}–${time(
+        candidate.start + candidate.duration
+      )} · ${candidate.duration} min`
+    );
+  } catch (error) {
+    $("edit-error").textContent =
+      error instanceof Error ? error.message : "Could not save. Try again.";
+  }
 };
 const refresh = () =>
   call(

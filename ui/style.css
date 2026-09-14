@@ -472,3 +472,184 @@ pre {
     padding-right: 20px;
   }
 }
+
+/* Show the proposed time in place, before any calendar mutation. */
+.calendar-guide {
+  min-height: 32px;
+  color: var(--muted-foreground);
+  font: 11px/1.5 ui-monospace, monospace;
+  padding-bottom: 12px;
+}
+.day {
+  transition: background-color 120ms ease;
+}
+.day.drop-target {
+  background-color: color-mix(in srgb, var(--primary) 7%, var(--card));
+}
+.calendar.dragging .day {
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 17px,
+    color-mix(in srgb, var(--border) 45%, transparent) 17px,
+    color-mix(in srgb, var(--border) 45%, transparent) 18px
+  );
+}
+.drag-source {
+  opacity: 0.28;
+}
+.event:hover:not(.fixed) {
+  border-color: var(--primary);
+}
+.event:focus-visible,
+.task:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.resize {
+  height: 12px;
+}
+.event:hover .resize:after {
+  width: 30px;
+  left: calc(50% - 15px);
+  background: var(--primary);
+}
+.resize:after {
+  transition: width 120ms ease, left 120ms ease;
+}
+.drop-preview {
+  position: absolute;
+  z-index: 5;
+  left: 3px;
+  right: 3px;
+  pointer-events: none;
+  border: 2px solid var(--primary);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 24%, var(--card));
+  padding: 5px 7px;
+  min-height: 20px;
+  overflow: visible;
+  transition: top 70ms ease, height 70ms ease;
+}
+.drop-preview strong {
+  display: block;
+  font: 600 11px/1.4 ui-monospace, monospace;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+.drop-preview span {
+  display: block;
+  font-size: 11px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.drop-preview small {
+  display: block;
+  font: 10px/1.4 ui-monospace, monospace;
+  color: var(--foreground);
+}
+.drop-preview.conflict {
+  border-style: dashed;
+  background: var(--secondary);
+}
+.drop-preview.conflict small {
+  color: var(--primary);
+}
+#editor {
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+  border-radius: 10px;
+}
+#editor[open] {
+  animation: dialog-in 140ms ease-out;
+}
+#editor::backdrop {
+  background: color-mix(in srgb, var(--background) 50%, transparent);
+}
+#editor h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+#edit-before {
+  margin: 0 0 20px;
+  font-size: 11px;
+}
+.time-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.time-fields label {
+  min-width: 0;
+}
+.time-arrow {
+  margin-top: 15px;
+  color: var(--muted-foreground);
+}
+.duration-row {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.duration-row label {
+  width: 110px;
+  flex-shrink: 0;
+}
+.duration-presets {
+  display: flex;
+  gap: 6px;
+  margin-top: 18px;
+}
+.duration-presets button {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.duration-presets button[aria-pressed="true"] {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--secondary);
+}
+.edit-summary {
+  margin: 16px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font: 12px/1.5 ui-monospace, monospace;
+  color: var(--primary);
+}
+.edit-error {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--primary);
+  margin: 10px 0 0;
+}
+.edit-error:empty {
+  display: none;
+}
+.dialog-actions {
+  justify-content: flex-end;
+}
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .day,
+  .drop-preview,
+  .resize:after {
+    transition: none;
+  }
+  #editor[open] {
+    animation: none;
+  }
+}

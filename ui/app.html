@@ -54,6 +54,14 @@
         <div id="backlog"></div>
       </aside>
       <div class="calendar-wrap">
+        <div
+          id="drag-guide"
+          class="calendar-guide"
+          role="status"
+          aria-live="polite"
+        >
+          Drag to move · Pull the bottom edge to resize
+        </div>
         <div class="calendar" id="calendar"></div>
         <div class="below-calendar">
           <details id="connection">
@@ -78,37 +86,71 @@
         </div>
       </div>
     </main>
-    <dialog id="editor">
-      <form method="dialog" id="edit-form">
-        <h2>Edit event</h2>
-        <label>Title<input id="edit-title" required maxlength="180" /></label
-        ><label
+    <dialog
+      id="editor"
+      aria-labelledby="editor-heading"
+      aria-describedby="edit-summary"
+    >
+      <form id="edit-form">
+        <h2 id="editor-heading">Move event</h2>
+        <p id="edit-before" class="fine"></p>
+        <label>Event<input id="edit-title" required maxlength="180" /></label>
+        <label
           >Date<input
             id="edit-date"
             type="date"
             min="2026-01-01"
             max="2027-12-31"
-            required /></label
-        ><label
-          >Time · UTC<input
-            id="edit-time"
-            type="time"
-            min="09:00"
-            max="16:45"
-            step="900"
-            required /></label
-        ><label
-          >Minutes<input
-            id="edit-duration"
-            type="number"
-            min="15"
-            max="180"
-            step="15"
             required
         /></label>
-        <div class="toolbar">
+        <div class="time-fields">
+          <label
+            >Start · UTC<input
+              id="edit-time"
+              type="time"
+              min="09:00"
+              max="16:45"
+              step="900"
+              required
+          /></label>
+          <span class="time-arrow" aria-hidden="true">→</span>
+          <label
+            >End · UTC<input
+              id="edit-end"
+              type="time"
+              min="09:15"
+              max="17:00"
+              step="900"
+              required
+          /></label>
+        </div>
+        <div class="duration-row">
+          <label
+            >Duration · min<input
+              id="edit-duration"
+              type="number"
+              min="15"
+              max="180"
+              step="15"
+              required
+          /></label>
+          <div class="duration-presets" aria-label="Duration presets">
+            <button type="button" data-duration="30" aria-pressed="false">
+              30m</button
+            ><button type="button" data-duration="60" aria-pressed="false">
+              1h</button
+            ><button type="button" data-duration="90" aria-pressed="false">
+              1.5h
+            </button>
+          </div>
+        </div>
+        <p id="edit-summary" class="edit-summary"></p>
+        <p id="edit-error" class="edit-error" role="alert"></p>
+        <div class="toolbar dialog-actions">
           <button type="button" id="cancel-edit">Cancel</button
-          ><button class="primary" type="submit">Save</button>
+          ><button class="primary" id="save-edit" type="submit">
+            Confirm move
+          </button>
         </div>
       </form>
     </dialog>
