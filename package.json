@@ -9,7 +9,7 @@
     "dev": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.ui.json && tsc --noEmit -p tsconfig.tests.json",
-    "test": "vitest run tests/core.test.ts tests/scheduling.test.ts",
+    "test": "vitest run tests/core.test.ts tests/scheduling.test.ts tests/view-tools.test.ts",
     "test:integration": "vitest run tests/integration.test.ts",
     "eval": "vitest run tests/evals.test.ts",
     "db:local": "wrangler d1 migrations apply planner --local",

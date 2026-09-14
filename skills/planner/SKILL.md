@@ -18,3 +18,6 @@ Start with the user job: understand the week, decide what matters, build a feasi
 9. Ask whether the plan was useful at a natural stopping point. Call report_outcome only with explicit feedback. A 200 response and a tool selection score do not prove user value.
 
 Useful prompts: “Plan the week of September 14, 2026 around Launch Orion”; “Customer research is now the top priority; rebuild my week”; “Move my demo prep to Thursday at 10:00 UTC”; “What won't fit this week?”
+
+## Interactive view tools
+When the host exposes tools from the open MCP App, call `planner_get_view_state` to read the visible week, item IDs and pending preview. Use `planner_preview_move` to open a move/resize confirmation, or `planner_preview_replan` to display a proposed week. These handlers run in the app iframe, not WebMCP. They do not persist calendar changes. Wait for the user to confirm or cancel in the UI; never describe a preview as saved or bypass its confirmation by calling a server mutation. A re-plan preview uses `plan_week` with `apply: false`; the Save plan button applies through the server. Hosts without view-tool support can still use the calendar controls and server tools. Do not assume every MCP client supports app-provided tools.

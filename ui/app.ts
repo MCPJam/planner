@@ -1,3 +1,4 @@
+import { registerViewTools } from "./view-tools";
 import { App } from "@modelcontextprotocol/ext-apps";
 import type { Item } from "../src/data";
 import { snapStart, proposedIssue, minutes } from "./scheduling";
@@ -15,10 +16,10 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) =>
 const embedded = window.parent !== window;
 const fragment = new URLSearchParams(location.hash.slice(1));
 let token =
-  fragment.get("token") ?? sessionStorage.getItem("planner-token") ?? "";
+  embedded ? "" : fragment.get("token") ?? sessionStorage.getItem("planner-token") ?? "";
 let mode =
-  fragment.get("mode") ?? sessionStorage.getItem("planner-mode") ?? "simple";
-if (fragment.has("token")) {
+  embedded ? "simple" : fragment.get("mode") ?? sessionStorage.getItem("planner-mode") ?? "simple";
+if (!embedded && fragment.has("token")) {
   sessionStorage.setItem("planner-token", token);
   sessionStorage.setItem("planner-mode", mode);
   history.replaceState(null, "", location.pathname);
@@ -30,13 +31,58 @@ let dragged: Item | null = null;
 let grabOffset = 0;
 let editAction: "edit" | "move" | "resize" | "schedule" = "edit";
 let preview: Item | null = null;
+let pendingPlan: {snapshot: Snapshot; args: Record<string, unknown>} | null = null;
+let contextTimer: ReturnType<typeof setTimeout>;
+function viewState(): Record<string, unknown> {
+  const compact = (item: Item) => ({id:item.id,title:item.title,date:item.date,start:item.start,duration:item.duration,fixed:item.fixed,project:item.project});
+  const displayed = pendingPlan?.snapshot ?? state;
+  return {week: displayed?.week, timezone:"UTC", busy, events: displayed?.events.map(compact) ?? [], backlog: displayed?.backlog.map(compact) ?? [], pending: pendingPlan ? {type:"replan",saved:false,summary:pendingPlan.snapshot.summary} : editing ? {type:"move",saved:false,item:editCandidate(),issue:proposedIssue(editCandidate()!,state?.events ?? [])} : null};
+}
+function syncContext() {
+  clearTimeout(contextTimer);
+  contextTimer = setTimeout(() => {
+    if (embedded && app.getHostCapabilities()?.updateModelContext)
+      void app.updateModelContext({content:[{type:"text",text:JSON.stringify(viewState())}]}).catch(() => {});
+  }, 150);
+}
+function requireAvailable() {
+  if (!state) throw new Error("Open a week with view_schedule first.");
+  if (busy || editing || pendingPlan || dragged) throw new Error("Finish or cancel the current preview first.");
+}
+async function previewReplan(options: {priorities:string[];max_focus_minutes:number}) {
+  requireAvailable();
+  const args = {week:state!.week,...options};
+  const snapshot = await call("plan_week",{...args,apply:false},"Preview my weekly plan",false);
+  pendingPlan = {snapshot,args};
+  $("plan-preview").hidden = false;
+  $("plan-summary").textContent = snapshot.summary;
+  render();
+  syncContext();
+  return viewState();
+}
 const guideDefault = "Drag to move · Pull the bottom edge to resize";
 const goal = crypto.randomUUID();
 const app = new App(
   { name: "MCPJam Planner", version: "1.0.0" },
-  {},
+  { tools: { listChanged: true } },
   { autoResize: true }
 );
+const disposeViewTools = registerViewTools(app, {
+  state: viewState,
+  move(args) {
+    requireAvailable();
+    const item = [...state!.events,...state!.backlog].find(x => x.id === args.id);
+    if (!item || item.fixed) throw new Error("Choose a visible, movable item.");
+    if (!state!.dates.includes(args.date)) throw new Error("Choose a date in the visible week.");
+    const candidate = {...item,...args};
+    const issue = proposedIssue(candidate,state!.events);
+    if (issue) throw new Error(issue);
+    edit(item,candidate,"move");
+    return viewState();
+  },
+  replan: previewReplan,
+});
+app.onteardown = async () => {clearTimeout(contextTimer);disposeViewTools();return {};};
 const time = (n: number) =>
   `${String(Math.floor(n / 60)).padStart(2, "0")}:${String(n % 60).padStart(
     2,
@@ -57,16 +103,20 @@ function accept(data: any) {
         : "Job tools";
   }
   if (data?.events && data?.dates) {
+    pendingPlan = null;
+    $("plan-preview").hidden = true;
     state = data;
     render();
     status(data.summary ?? "");
+    syncContext();
     if ($<HTMLDialogElement>("editor").open) validateEdit();
   }
 }
 async function call(
   name: string,
   args: Record<string, unknown>,
-  query: string
+  query: string,
+  acceptResult = true
 ) {
   if (busy) throw new Error("Please wait for the current change.");
   busy = true;
@@ -116,7 +166,7 @@ async function call(
       data = await r.json();
       if (!r.ok) throw new Error(data.error ?? "Request failed");
     }
-    accept(data);
+    if (acceptResult) accept(data);
     $("activity").textContent = JSON.stringify(
       {
         tool: name,
@@ -129,6 +179,7 @@ async function call(
     return data;
   } finally {
     busy = false;
+    syncContext();
     document
       .querySelectorAll<HTMLButtonElement>("button")
       .forEach((x) => (x.disabled = false));
@@ -139,7 +190,7 @@ const act = (fn: () => Promise<unknown>) =>
   void fn().catch((e) => status(e.message, true));
 function render() {
   if (!state) return;
-  const s = state;
+  const s = pendingPlan?.snapshot ?? state;
   $<HTMLInputElement>("week").value = s.week;
   $("backlog-count").textContent = `(${s.backlog.length})`;
   const backlog = $("backlog");
@@ -193,7 +244,7 @@ function render() {
     day.className = "day";
     day.dataset.date = date;
     day.ondragover = (e) => {
-      if (!dragged || busy) return;
+      if (!dragged || busy || pendingPlan) return;
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
       const rect = day.getBoundingClientRect();
@@ -218,7 +269,7 @@ function render() {
     };
     day.ondrop = (e) => {
       e.preventDefault();
-      if (!dragged || busy) return;
+      if (!dragged || busy || pendingPlan) return;
       const rect = day.getBoundingClientRect();
       const candidate = {
         ...dragged,
@@ -269,7 +320,7 @@ function render() {
         resize.className = "resize";
         resize.title = "Drag to resize";
         resize.onpointerdown = (e) => {
-          if (busy) return;
+          if (busy || pendingPlan) return;
           e.stopPropagation();
           e.preventDefault();
           const y = e.clientY;
@@ -318,7 +369,7 @@ function render() {
 }
 function wireDrag(el: HTMLElement, item: Item, backlog = false) {
   el.ondragstart = (e) => {
-    if (busy || $<HTMLDialogElement>("editor").open) {
+    if (busy || pendingPlan || $<HTMLDialogElement>("editor").open) {
       e.preventDefault();
       return;
     }
@@ -392,7 +443,7 @@ function edit(
   candidate: Item = { ...item, start: item.start || 600 },
   action: typeof editAction = "edit"
 ) {
-  if (busy || $<HTMLDialogElement>("editor").open) return;
+  if (busy || pendingPlan || $<HTMLDialogElement>("editor").open) return;
   editing = item;
   editAction = action;
   $("editor-heading").textContent =
@@ -466,6 +517,7 @@ function validateEdit() {
         String(Number(b.dataset.duration) === candidate.duration)
       )
     );
+  syncContext();
   return !issue;
 }
 for (const id of ["edit-date", "edit-title"])
@@ -507,6 +559,7 @@ $("editor").addEventListener("cancel", (e) => {
 $("editor").addEventListener("close", () => {
   editing = null;
   clearPreview();
+  syncContext();
 });
 $("edit-form").onsubmit = async (e) => {
   e.preventDefault();
@@ -540,12 +593,14 @@ $("edit-form").onsubmit = async (e) => {
       error instanceof Error ? error.message : "Could not save. Try again.";
   }
 };
-const refresh = () =>
-  call(
+const refresh = async () => {
+  if (pendingPlan || editing) throw new Error("Finish or cancel the preview first.");
+  return call(
     "view_schedule",
     { week: $<HTMLInputElement>("week").value },
     "Show my selected week"
   );
+};
 $("week").onchange = () => act(refresh);
 for (const [id, days] of [
   ["prev", -7],
@@ -557,20 +612,12 @@ for (const [id, days] of [
     $<HTMLInputElement>("week").value = d.toISOString().slice(0, 10);
     act(refresh);
   };
-$("replan").onclick = () =>
-  act(() =>
-    call(
-      "plan_week",
-      {
-        week: $<HTMLInputElement>("week").value,
-        priorities: [$<HTMLSelectElement>("priority").value],
-        apply: true,
-      },
-      `Re-plan my week with ${
-        $<HTMLSelectElement>("priority").value
-      } as the top priority`
-    )
-  );
+$("replan").onclick = () => act(() => previewReplan({priorities:[$<HTMLSelectElement>("priority").value],max_focus_minutes:90}));
+$("cancel-plan").onclick = () => {pendingPlan=null;$("plan-preview").hidden=true;render();syncContext();};
+$("save-plan").onclick = () => act(async () => {
+  if (!pendingPlan) return;
+  await call("plan_week",{...pendingPlan.args,apply:true},"User confirmed the displayed re-plan");
+});
 
 $("copy-token").onclick = () =>
   act(async () => {
