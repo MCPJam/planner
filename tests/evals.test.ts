@@ -97,9 +97,13 @@ for (const mode of ["simple", "context", "discovery"])
                       result.text
                     );
                   if (job === "reprioritize")
-                    passed &&= tasks
-                      .filter((x: any) => x.project === "Customer research")
-                      .every((x: any) => x.priority === 1);
+                    passed &&=
+                      tasks.some(
+                        (x: any) => x.project === "Customer research"
+                      ) &&
+                      tasks
+                        .filter((x: any) => x.project === "Customer research")
+                        .every((x: any) => x.priority === 1);
                 }
                 reports.push({
                   mode,

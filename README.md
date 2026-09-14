@@ -11,7 +11,7 @@ A live, stateless MCP planning demo for **Building Effective Stateless MCP Serve
 
 Add the MCP URL as a remote server in MCPJam, ChatGPT, Claude, or Cursor. The OAuth consent screen lets you choose a toolset. No real identity or external account is connected. A new consent creates an isolated demo workspace. Reconnect to change toolsets.
 
-For clients accepting custom headers, open the standalone app, expand **Connection & tool activity**, copy the bearer token, and use `Authorization: Bearer <token>`. Tokens expire in seven days. The standalone UI and an MCP client using that token share saved edits.
+For clients accepting custom headers, open the standalone app, expand **Connect**, copy the bearer token, and use `Authorization: Bearer <token>`. Tokens expire in seven days. The standalone UI and an MCP client using that token share saved edits. The bearer-authenticated `POST /api/reset` resets that token's disposable workspace for repeatable eval trials.
 
 MCP Apps-capable hosts can render the calendar and call server tools from the UI. Other hosts get structured/text results and can still plan and edit through tools. Host-specific UI support varies; a successful MCP wire test is not a claim of manual certification in every client.
 
