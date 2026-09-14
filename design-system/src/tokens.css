@@ -1,0 +1,22 @@
+/* Planner roles, based on the supplied Paper design. Keep colors here. */
+:root,.dark {
+ --background:#030303;
+ --foreground:#F3EDE8;
+ --card:#0D0B0A;
+ --card-foreground:#F3EDE8;
+ --popover:#15110F;
+ --popover-foreground:#F3EDE8;
+ --primary:#E07856;
+ --primary-foreground:#090504;
+ --secondary:#211A17;
+ --secondary-foreground:#F3EDE8;
+ --muted:#161311;
+ --muted-foreground:#A69B94;
+ --accent:#29211D;
+ --accent-foreground:#F3EDE8;
+ --border:#322924;
+ --input:#514037;
+ --ring:#E07856;
+ --destructive:#EE362F;
+ --overlay:#030303B8;
+}

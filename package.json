@@ -1,0 +1,31 @@
+{
+  "name": "mcpjam-planner",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Stateless MCP planning demo: three toolsets, MCP Apps, user-value evals",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.ui.json",
+    "test": "vitest run tests/core.test.ts",
+    "test:integration": "vitest run tests/integration.test.ts",
+    "eval": "vitest run tests/evals.test.ts",
+    "db:local": "wrangler d1 migrations apply planner --local",
+    "db:remote": "wrangler d1 migrations apply planner --remote"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@modelcontextprotocol/ext-apps": "2.0.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@mcpjam/sdk": "8.7.1",
+    "esbuild": "latest",
+    "typescript": "latest",
+    "vitest": "latest",
+    "wrangler": "latest"
+  }
+}

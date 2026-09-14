@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS changes (workspace TEXT NOT NULL, id TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(workspace,id));
+CREATE TABLE IF NOT EXISTS contexts (workspace TEXT NOT NULL, session_id TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY(workspace,session_id));
+CREATE TABLE IF NOT EXISTS traces (id TEXT PRIMARY KEY, workspace TEXT NOT NULL, tool TEXT NOT NULL, session_id TEXT, user_query TEXT, user_intent TEXT, outcome TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX IF NOT EXISTS traces_workspace ON traces(workspace,created_at);
+CREATE TABLE IF NOT EXISTS clients (id TEXT PRIMARY KEY, body TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS codes (code TEXT PRIMARY KEY, body TEXT NOT NULL, expires INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS tokens (token TEXT PRIMARY KEY, workspace TEXT NOT NULL, mode TEXT NOT NULL, expires INTEGER NOT NULL);

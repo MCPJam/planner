@@ -1,0 +1,64 @@
+name: Planner user-value gate
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      run_llm_evals:
+        description: Run model-driven MCPJam outcome evals (requires OPENAI_API_KEY)
+        type: boolean
+        default: false
+      model:
+        description: MCPJam model identifier
+        default: openai/gpt-4.1-mini
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build && npm run typecheck && npm test
+      - run: npm run db:local
+      - name: Start local Cloudflare Worker
+        run: |
+          npx wrangler dev --ip 127.0.0.1 --port 8787 > /tmp/planner.log 2>&1 &
+          for i in $(seq 1 30); do
+            if curl --fail http://127.0.0.1:8787/health; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/planner.log
+          exit 1
+      - name: MCPJam SDK protocol and user-outcome tests
+        run: npm run test:integration
+        env:
+          PLANNER_URL: http://127.0.0.1:8787
+      - name: MCPJam LLM user-value eval gate
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_MODEL: ${{ inputs.model || 'openai/gpt-4.1-mini' }}
+          EVAL_ITERATIONS: 3
+          PLANNER_URL: http://127.0.0.1:8787
+          REQUIRE_EVALS: ${{ inputs.run_llm_evals || 'false' }}
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            npm run eval
+          elif [ "$REQUIRE_EVALS" = "true" ]; then
+            echo "::error::OPENAI_API_KEY is required to run LLM evals."
+            exit 1
+          else
+            echo "::warning::LLM evals not run: add OPENAI_API_KEY to enable the 80% user-value gate. Protocol/outcome tests ran above."
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: planner-eval-results
+          path: test-results/
+          if-no-files-found: ignore
